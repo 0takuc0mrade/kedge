@@ -1,0 +1,15 @@
+[package]
+name = "claim-evaluator"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+risc0-zkvm = { version = "3.0", default-features = false }
+kedge-core = { path = "../../core" }
+serde = { version = "1", default-features = false, features = ["derive"] }
+
+[[bin]]
+name = "claim-evaluator"
+path = "src/main.rs"

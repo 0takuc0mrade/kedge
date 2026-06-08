@@ -10,6 +10,8 @@ mod evaluator;
 mod submitter;
 
 use eyre::Result;
+use kedge_core::ClaimOutput;
+use risc0_zkvm::{default_prover, ExecutorEnv};
 use tracing::{info, warn, error};
 use tracing_subscriber::EnvFilter;
 
@@ -35,6 +37,7 @@ async fn main() -> Result<()> {
     info!("RPC:   {}", cfg.rpc_url);
     info!("Mock API: {}", cfg.mock_api_url);
     info!("Polling interval: {}s", cfg.polling_interval_secs);
+    info!("RISC Zero dev mode: {}", cfg.risc0_dev_mode);
 
     // Main autonomous loop
     info!("🔄 Starting autonomous monitoring loop...");
@@ -70,7 +73,7 @@ async fn run_cycle(cfg: &config::Config) -> Result<bool> {
         shipment.tracking_id, shipment.status, shipment.delay_hours
     );
 
-    // Phase 2: Claim Evaluation
+    // Phase 2: Claim Evaluation (off-chain quick check)
     let evaluation = evaluator::evaluate_claim(&shipment);
 
     if !evaluation.is_triggered {
@@ -82,12 +85,30 @@ async fn run_cycle(cfg: &config::Config) -> Result<bool> {
         shipment.tracking_id, evaluation.payout_amount
     );
 
-    // Phase 3: ZKP Generation (Day 3)
-    // TODO: Generate RISC Zero proof of claim evaluation
-    info!("🔐 ZKP generation: [placeholder — Day 3]");
+    // Phase 3: ZKP Generation
+    info!("🔐 Generating Zero-Knowledge Proof...");
+
+    let env = ExecutorEnv::builder()
+        .write(&evaluation.claim_input).map_err(|e| eyre::eyre!("{e}"))?
+        .build().map_err(|e| eyre::eyre!("{e}"))?;
+
+    let prover = default_prover();
+    let prove_info = prover.prove(env, kedge_methods::CLAIM_EVALUATOR_ELF).map_err(|e| eyre::eyre!("{e}"))?;
+    let receipt = prove_info.receipt;
+
+    // Decode the journal to verify the output matches
+    let journal_output: ClaimOutput = receipt.journal.decode().map_err(|e| eyre::eyre!("{e}"))?;
+    info!(
+        "🔐 ZKP generated — journal confirms: triggered={}, payout={} MockUSDT",
+        journal_output.is_triggered, journal_output.payout_amount
+    );
+
+    // Verify the receipt (validates the proof itself)
+    receipt.verify(kedge_methods::CLAIM_EVALUATOR_ID).map_err(|e| eyre::eyre!("{e}"))?;
+    info!("✅ ZKP receipt verified successfully");
 
     // Phase 4: On-Chain Settlement (Day 7)
-    // TODO: Submit claim transaction to ClaimRegistry
+    // TODO: Submit claim transaction to ClaimRegistry with ZKP seal + journal
     info!("⛓️  On-chain submission: [placeholder — Day 7]");
 
     Ok(true)

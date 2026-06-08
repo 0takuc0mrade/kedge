@@ -1,24 +1,13 @@
 //! Claim evaluation engine for the Kedge agent.
 //!
-//! Implements the parametric insurance logic: given a shipment's
-//! current telemetry, determines whether the delay threshold has
-//! been breached and calculates the appropriate payout tier.
+//! This module bridges the agent's ingestor data with the shared
+//! core evaluation logic. It converts `ShipmentData` into `ClaimInput`,
+//! runs the evaluation, and wraps the result for the agent's workflow.
 
-use crate::ingestor::{ShipmentData, ShipmentStatus};
+use crate::ingestor::ShipmentData;
+use kedge_core::{self, ClaimInput, ClaimOutput, ShipmentStatus as CoreStatus};
 
-/// Minimum delay (in hours) required to trigger any claim.
-const DELAY_THRESHOLD_HOURS: u64 = 48;
-
-/// Payout tiers as a percentage of insured value.
-/// Each tier is (min_delay_hours, max_delay_hours, payout_percentage).
-const PAYOUT_TIERS: &[(u64, u64, u64)] = &[
-    (48, 72, 25),   // 48-72h delay → 25% payout
-    (72, 120, 50),  // 72-120h delay → 50% payout
-    (120, 240, 75), // 120-240h delay → 75% payout
-    (240, u64::MAX, 100), // 240h+ delay → 100% payout (total loss)
-];
-
-/// Result of a claim evaluation cycle.
+/// Result of a claim evaluation cycle (agent-side wrapper).
 #[derive(Debug, Clone)]
 pub struct ClaimEvaluation {
     /// Whether the parametric conditions have been met
@@ -38,68 +27,64 @@ pub struct ClaimEvaluation {
 
     /// Human-readable reason for the evaluation outcome
     pub reason: String,
+
+    /// The core input (needed for ZKP generation)
+    pub claim_input: ClaimInput,
+}
+
+/// Convert ingestor ShipmentStatus to core ShipmentStatus.
+fn to_core_status(status: &crate::ingestor::ShipmentStatus) -> CoreStatus {
+    match status {
+        crate::ingestor::ShipmentStatus::OnTime => CoreStatus::OnTime,
+        crate::ingestor::ShipmentStatus::Delayed => CoreStatus::Delayed,
+        crate::ingestor::ShipmentStatus::CriticalDelay => CoreStatus::CriticalDelay,
+        crate::ingestor::ShipmentStatus::Lost => CoreStatus::Lost,
+    }
 }
 
 /// Evaluate a shipment's data against the parametric insurance conditions.
 ///
-/// The logic is intentionally straightforward for the hackathon demo:
-/// - If `delay_hours >= DELAY_THRESHOLD_HOURS`, the claim is triggered
-/// - Payout amount scales with delay severity across defined tiers
-/// - The evaluation result contains all data needed for ZKP generation
+/// Delegates to `kedge_core::evaluate()` — the single source of truth
+/// for claim logic that is also used inside the zkVM guest program.
 pub fn evaluate_claim(shipment: &ShipmentData) -> ClaimEvaluation {
-    // Check if shipment status indicates a qualifying event
-    let qualifies = matches!(
-        shipment.status,
-        ShipmentStatus::CriticalDelay | ShipmentStatus::Lost
-    ) && shipment.delay_hours >= DELAY_THRESHOLD_HOURS;
+    let claim_input = ClaimInput {
+        tracking_id: shipment.tracking_id.clone(),
+        status: to_core_status(&shipment.status),
+        delay_hours: shipment.delay_hours,
+        insured_value: shipment.insured_value,
+        timestamp: shipment.timestamp,
+    };
 
-    if !qualifies {
-        return ClaimEvaluation {
-            is_triggered: false,
-            tracking_id: shipment.tracking_id.clone(),
-            observed_delay_hours: shipment.delay_hours,
-            payout_amount: 0,
-            payout_percentage: 0,
-            reason: format!(
-                "Delay of {}h does not meet {}h threshold or status {:?} is non-qualifying",
-                shipment.delay_hours, DELAY_THRESHOLD_HOURS, shipment.status
-            ),
-        };
-    }
+    let output: ClaimOutput = kedge_core::evaluate(&claim_input);
 
-    // Determine payout tier
-    let (payout_pct, tier_label) = PAYOUT_TIERS
-        .iter()
-        .find(|(min, max, _)| shipment.delay_hours >= *min && shipment.delay_hours < *max)
-        .map(|(min, max, pct)| {
-            let label = if *max == u64::MAX {
-                format!("{}h+ (total loss)", min)
-            } else {
-                format!("{}h-{}h", min, max)
-            };
-            (*pct, label)
-        })
-        .unwrap_or((100, "overflow".to_string()));
-
-    let payout_amount = (shipment.insured_value * payout_pct) / 100;
+    let reason = if output.is_triggered {
+        format!(
+            "Delay of {}h → {}% of {} MockUSDT = {} MockUSDT",
+            shipment.delay_hours, output.payout_percentage,
+            shipment.insured_value, output.payout_amount
+        )
+    } else {
+        format!(
+            "Delay of {}h does not meet threshold or status {:?} is non-qualifying",
+            shipment.delay_hours, shipment.status
+        )
+    };
 
     ClaimEvaluation {
-        is_triggered: true,
+        is_triggered: output.is_triggered,
         tracking_id: shipment.tracking_id.clone(),
         observed_delay_hours: shipment.delay_hours,
-        payout_amount,
-        payout_percentage: payout_pct,
-        reason: format!(
-            "Delay of {}h in tier {} → {}% of {} MockUSDT = {} MockUSDT",
-            shipment.delay_hours, tier_label, payout_pct, shipment.insured_value, payout_amount
-        ),
+        payout_amount: output.payout_amount,
+        payout_percentage: output.payout_percentage,
+        reason,
+        claim_input,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ingestor::ShipmentData;
+    use crate::ingestor::{ShipmentData, ShipmentStatus};
 
     fn make_shipment(status: ShipmentStatus, delay_hours: u64, insured_value: u64) -> ShipmentData {
         ShipmentData {
@@ -133,7 +118,6 @@ mod tests {
 
     #[test]
     fn test_no_trigger_below_threshold() {
-        // Critical delay status but hours below threshold
         let shipment = make_shipment(ShipmentStatus::CriticalDelay, 40, 50000);
         let eval = evaluate_claim(&shipment);
         assert!(!eval.is_triggered);
@@ -191,5 +175,13 @@ mod tests {
         assert!(eval.is_triggered);
         assert_eq!(eval.payout_percentage, 50);
         assert_eq!(eval.payout_amount, 40000);
+    }
+
+    #[test]
+    fn test_claim_input_preserved() {
+        let shipment = make_shipment(ShipmentStatus::CriticalDelay, 96, 100000);
+        let eval = evaluate_claim(&shipment);
+        assert_eq!(eval.claim_input.tracking_id, "TEST-001");
+        assert_eq!(eval.claim_input.delay_hours, 96);
     }
 }

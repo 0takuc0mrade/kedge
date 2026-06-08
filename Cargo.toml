@@ -2,5 +2,9 @@
 resolver = "2"
 members = [
     "agent",
+    "core",
     "methods",
+]
+exclude = [
+    "methods/guest",
 ]

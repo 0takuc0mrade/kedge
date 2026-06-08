@@ -4,4 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "RISC Zero guest methods for Kedge claim verification"
 
+[build-dependencies]
+risc0-build = "3.0"
+
 [dependencies]
+risc0-zkvm = "3.0"
+
+[package.metadata.risc0]
+methods = ["guest"]

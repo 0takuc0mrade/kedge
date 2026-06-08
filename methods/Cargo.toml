@@ -1,0 +1,7 @@
+[package]
+name = "kedge-methods"
+version = "0.1.0"
+edition = "2021"
+description = "RISC Zero guest methods for Kedge claim verification"
+
+[dependencies]

@@ -32,6 +32,9 @@ pub struct Config {
     /// SettlementVault contract address
     pub settlement_vault_address: String,
 
+    /// ERC8004 Identity Registry contract address
+    pub erc8004_identity_registry: String,
+
     /// Whether RISC Zero is running in dev mode (no real proofs)
     pub risc0_dev_mode: bool,
 }
@@ -45,8 +48,7 @@ impl Config {
         let _ = dotenvy::dotenv();
 
         Ok(Self {
-            agent_name: std::env::var("AGENT_NAME")
-                .unwrap_or_else(|_| "Kedge".to_string()),
+            agent_name: std::env::var("AGENT_NAME").unwrap_or_else(|_| "Kedge".to_string()),
 
             rpc_url: std::env::var("MANTLE_SEPOLIA_RPC")
                 .unwrap_or_else(|_| "https://rpc.sepolia.mantle.xyz".to_string()),
@@ -64,17 +66,16 @@ impl Config {
                 .parse()
                 .wrap_err("Invalid POLLING_INTERVAL_SECS")?,
 
-            agent_private_key: std::env::var("AGENT_HOT_WALLET_PRIVATE_KEY")
+            agent_private_key: std::env::var("AGENT_HOT_WALLET_PRIVATE_KEY").unwrap_or_default(),
+
+            claim_registry_address: std::env::var("CLAIM_REGISTRY_ADDRESS").unwrap_or_default(),
+
+            settlement_vault_address: std::env::var("SETTLEMENT_VAULT_ADDRESS").unwrap_or_default(),
+
+            erc8004_identity_registry: std::env::var("ERC8004_IDENTITY_REGISTRY")
                 .unwrap_or_default(),
 
-            claim_registry_address: std::env::var("CLAIM_REGISTRY_ADDRESS")
-                .unwrap_or_default(),
-
-            settlement_vault_address: std::env::var("SETTLEMENT_VAULT_ADDRESS")
-                .unwrap_or_default(),
-
-            risc0_dev_mode: std::env::var("RISC0_DEV_MODE")
-                .unwrap_or_else(|_| "1".to_string())
+            risc0_dev_mode: std::env::var("RISC0_DEV_MODE").unwrap_or_else(|_| "1".to_string())
                 == "1",
         })
     }

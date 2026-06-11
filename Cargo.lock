@@ -3091,12 +3091,14 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber 0.3.23",
+ "url",
 ]
 
 [[package]]
 name = "kedge-core"
 version = "0.1.0"
 dependencies = [
+ "alloy-sol-types",
  "serde",
 ]
 

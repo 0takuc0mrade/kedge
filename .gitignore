@@ -5,6 +5,12 @@
 target/
 **/*.rs.bk
 
+# Local debugging helpers
+agent/print_hex
+agent/print_hex.rs
+agent/print_id.rs
+agent/test_receipt.rs
+
 # Foundry
 contracts/cache/
 contracts/out/

@@ -53,15 +53,18 @@ pub fn evaluate_claim(shipment: &ShipmentData) -> ClaimEvaluation {
         delay_hours: shipment.delay_hours,
         insured_value: shipment.insured_value,
         timestamp: shipment.timestamp,
+        claimant: [0x42; 20], // Hardcoded dummy claimant
     };
 
     let output: ClaimOutput = kedge_core::evaluate(&claim_input);
 
-    let reason = if output.is_triggered {
+    let reason = if output.isTriggered {
         format!(
             "Delay of {}h → {}% of {} MockUSDT = {} MockUSDT",
-            shipment.delay_hours, output.payout_percentage,
-            shipment.insured_value, output.payout_amount
+            shipment.delay_hours,
+            output.payoutPercentage,
+            shipment.insured_value,
+            output.payoutAmount
         )
     } else {
         format!(
@@ -71,11 +74,11 @@ pub fn evaluate_claim(shipment: &ShipmentData) -> ClaimEvaluation {
     };
 
     ClaimEvaluation {
-        is_triggered: output.is_triggered,
+        is_triggered: output.isTriggered,
         tracking_id: shipment.tracking_id.clone(),
         observed_delay_hours: shipment.delay_hours,
-        payout_amount: output.payout_amount,
-        payout_percentage: output.payout_percentage,
+        payout_amount: output.payoutAmount,
+        payout_percentage: output.payoutPercentage,
         reason,
         claim_input,
     }

@@ -10,6 +10,7 @@
 extern crate alloc;
 
 use alloc::string::String;
+use alloy_sol_types::sol;
 use serde::{Deserialize, Serialize};
 
 /// Shipment status categories matching the mock freight API.
@@ -43,26 +44,25 @@ pub struct ClaimInput {
     pub insured_value: u64,
     /// Unix timestamp of the data snapshot
     pub timestamp: u64,
+    /// Address of the claimant who will receive the funds
+    pub claimant: [u8; 20],
 }
 
-/// Output from the ZKP guest program (public journal).
-///
-/// This is committed to the journal and becomes the public
-/// output that is verified on-chain. It proves that the claim
-/// evaluation was performed correctly without revealing the
-/// underlying shipment data.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ClaimOutput {
-    /// Whether the parametric conditions have been met
-    pub is_triggered: bool,
-    /// Payout amount in MockUSDT (0 if not triggered)
-    pub payout_amount: u64,
-    /// Payout percentage applied (0-100)
-    pub payout_percentage: u64,
-    /// Hash of the tracking ID (privacy-preserving identifier)
-    pub tracking_id_hash: [u8; 32],
-    /// Unix timestamp of the evaluation
-    pub timestamp: u64,
+sol! {
+    /// Output from the ZKP guest program (public journal).
+    ///
+    /// This is committed to the journal and becomes the public
+    /// output that is verified on-chain. It proves that the claim
+    /// evaluation was performed correctly without revealing the
+    /// underlying shipment data.
+    struct ClaimOutput {
+        bool isTriggered;
+        uint64 payoutAmount;
+        uint64 payoutPercentage;
+        bytes32 trackingIdHash;
+        uint64 timestamp;
+        address claimant;
+    }
 }
 
 // ─── Evaluation Constants ──────────────────────────────────
@@ -72,10 +72,10 @@ pub const DELAY_THRESHOLD_HOURS: u64 = 48;
 
 /// Payout tiers: (min_delay_hours, max_delay_hours, payout_percentage).
 pub const PAYOUT_TIERS: &[(u64, u64, u64)] = &[
-    (48, 72, 25),          // 48-72h delay  → 25% payout
-    (72, 120, 50),         // 72-120h delay → 50% payout
-    (120, 240, 75),        // 120-240h delay → 75% payout
-    (240, u64::MAX, 100),  // 240h+ delay  → 100% payout (total loss)
+    (48, 72, 25),         // 48-72h delay  → 25% payout
+    (72, 120, 50),        // 72-120h delay → 50% payout
+    (120, 240, 75),       // 120-240h delay → 75% payout
+    (240, u64::MAX, 100), // 240h+ delay  → 100% payout (total loss)
 ];
 
 /// Evaluate a claim input against parametric conditions.
@@ -91,11 +91,12 @@ pub fn evaluate(input: &ClaimInput) -> ClaimOutput {
 
     if !qualifies {
         return ClaimOutput {
-            is_triggered: false,
-            payout_amount: 0,
-            payout_percentage: 0,
-            tracking_id_hash: simple_hash(input.tracking_id.as_bytes()),
+            isTriggered: false,
+            payoutAmount: 0,
+            payoutPercentage: 0,
+            trackingIdHash: simple_hash(input.tracking_id.as_bytes()).into(),
             timestamp: input.timestamp,
+            claimant: input.claimant.into(),
         };
     }
 
@@ -109,11 +110,12 @@ pub fn evaluate(input: &ClaimInput) -> ClaimOutput {
     let payout_amount = (input.insured_value * payout_pct) / 100;
 
     ClaimOutput {
-        is_triggered: true,
-        payout_amount,
-        payout_percentage: payout_pct,
-        tracking_id_hash: simple_hash(input.tracking_id.as_bytes()),
+        isTriggered: true,
+        payoutAmount: payout_amount,
+        payoutPercentage: payout_pct,
+        trackingIdHash: simple_hash(input.tracking_id.as_bytes()).into(),
         timestamp: input.timestamp,
+        claimant: input.claimant.into(),
     }
 }
 
@@ -149,52 +151,53 @@ mod tests {
             delay_hours,
             insured_value,
             timestamp: 1749225600,
+            claimant: [0xAB; 20],
         }
     }
 
     #[test]
     fn test_no_trigger_on_time() {
         let result = evaluate(&make_input(ShipmentStatus::OnTime, 0, 50000));
-        assert!(!result.is_triggered);
-        assert_eq!(result.payout_amount, 0);
+        assert!(!result.isTriggered);
+        assert_eq!(result.payoutAmount, 0);
     }
 
     #[test]
     fn test_tier_1() {
         let result = evaluate(&make_input(ShipmentStatus::CriticalDelay, 48, 100000));
-        assert!(result.is_triggered);
-        assert_eq!(result.payout_percentage, 25);
-        assert_eq!(result.payout_amount, 25000);
+        assert!(result.isTriggered);
+        assert_eq!(result.payoutPercentage, 25);
+        assert_eq!(result.payoutAmount, 25000);
     }
 
     #[test]
     fn test_tier_2() {
         let result = evaluate(&make_input(ShipmentStatus::CriticalDelay, 96, 100000));
-        assert!(result.is_triggered);
-        assert_eq!(result.payout_percentage, 50);
-        assert_eq!(result.payout_amount, 50000);
+        assert!(result.isTriggered);
+        assert_eq!(result.payoutPercentage, 50);
+        assert_eq!(result.payoutAmount, 50000);
     }
 
     #[test]
     fn test_tier_3() {
         let result = evaluate(&make_input(ShipmentStatus::CriticalDelay, 150, 100000));
-        assert!(result.is_triggered);
-        assert_eq!(result.payout_percentage, 75);
-        assert_eq!(result.payout_amount, 75000);
+        assert!(result.isTriggered);
+        assert_eq!(result.payoutPercentage, 75);
+        assert_eq!(result.payoutAmount, 75000);
     }
 
     #[test]
     fn test_tier_4_total_loss() {
         let result = evaluate(&make_input(ShipmentStatus::Lost, 300, 100000));
-        assert!(result.is_triggered);
-        assert_eq!(result.payout_percentage, 100);
-        assert_eq!(result.payout_amount, 100000);
+        assert!(result.isTriggered);
+        assert_eq!(result.payoutPercentage, 100);
+        assert_eq!(result.payoutAmount, 100000);
     }
 
     #[test]
     fn test_tracking_id_hash_deterministic() {
         let r1 = evaluate(&make_input(ShipmentStatus::CriticalDelay, 48, 100000));
         let r2 = evaluate(&make_input(ShipmentStatus::CriticalDelay, 48, 100000));
-        assert_eq!(r1.tracking_id_hash, r2.tracking_id_hash);
+        assert_eq!(r1.trackingIdHash, r2.trackingIdHash);
     }
 }

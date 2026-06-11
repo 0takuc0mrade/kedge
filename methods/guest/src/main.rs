@@ -13,16 +13,21 @@
 
 use kedge_core::{evaluate, ClaimInput};
 use risc0_zkvm::guest::env;
+use alloy_sol_types::SolValue;
 
 risc0_zkvm::guest::entry!(main);
 
 fn main() {
-    // Read the private input from the host
-    let input: ClaimInput = env::read();
+    // 1. Read the private witness (shipment data) from the host
+    // The input is passed via env::read() using standard serialization
+    let claim_input: ClaimInput = env::read();
 
-    // Evaluate the claim using the shared parametric logic
-    let output = evaluate(&input);
+    // 2. Evaluate the claim against the parametric rules
+    let claim_output = evaluate(&claim_input);
 
-    // Commit the evaluation result to the journal (public output)
-    env::commit(&output);
+    // 3. ABI Encode the output and commit the raw bytes to the public journal
+    // We use env::commit_slice because we are writing standard Solidity ABI-encoded bytes,
+    // not a serialized Rust struct.
+    let encoded = claim_output.abi_encode();
+    env::commit_slice(&encoded);
 }

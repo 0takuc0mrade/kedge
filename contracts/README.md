@@ -4,8 +4,8 @@ Solidity contracts for Kedge's identity-gated parametric claim settlement.
 
 ## Contracts
 
-- `AgentIdentityRegistry.sol`: mints the Kedge agent identity and exposes agent
-  authorization checks.
+- `AgentIdentityRegistry.sol`: ERC-8004-compatible registration, metadata,
+  URI, verified agent-wallet, transfer, and authorization behavior.
 - `ClaimRegistry.sol`: verifies RISC Zero receipts, decodes claim journals,
   blocks replayed claims, and triggers payouts.
 - `SettlementVault.sol`: holds ERC-20 liquidity and permits disbursement only
@@ -20,13 +20,25 @@ forge build
 forge test
 ```
 
-For local deployment, start Anvil and run:
+For local deployment with the mock verifier, start Anvil and run:
 
 ```bash
-forge script script/Deploy.s.sol:DeployScript \
+forge script script/Deploy.s.sol:DeployLocal \
   --rpc-url http://127.0.0.1:8545 \
   --broadcast
 ```
 
-The deployment script currently uses `RiscZeroMockVerifier` and is for local
-development only.
+For Mantle Sepolia, configure the variables documented in the root
+`.env.example`, simulate, then broadcast:
+
+```bash
+forge script script/Deploy.s.sol:DeployMantleSepolia \
+  --rpc-url "$MANTLE_SEPOLIA_RPC"
+
+forge script script/Deploy.s.sol:DeployMantleSepolia \
+  --rpc-url "$MANTLE_SEPOLIA_RPC" \
+  --broadcast
+```
+
+The testnet script deploys `RiscZeroGroth16Verifier` v3.0.1 with the matching
+control IDs; it does not use `RiscZeroMockVerifier`.

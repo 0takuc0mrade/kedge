@@ -1,0 +1,24 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "Kedge",
+  "description": "Autonomous parametric shipping-insurance claim adjuster. Kedge verifies oracle-signed logistics events in the RISC Zero zkVM and submits authenticated settlements to Mantle.",
+  "image": "https://opengraph.githubassets.com/1/0takuc0mrade/kedge",
+  "services": [
+    {
+      "name": "web",
+      "endpoint": "https://github.com/0takuc0mrade/kedge"
+    }
+  ],
+  "x402Support": false,
+  "active": true,
+  "registrations": [
+    {
+      "agentId": 1,
+      "agentRegistry": "eip155:5003:REPLACE_WITH_IDENTITY_REGISTRY"
+    }
+  ],
+  "supportedTrust": [
+    "zk-proof",
+    "oracle-attestation"
+  ]
+}

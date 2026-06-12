@@ -3,25 +3,29 @@
 Kedge is an autonomous claim adjuster for parametric shipping insurance, built
 for the Mantle Turing Test Hackathon 2026 AI x RWA track.
 
-The agent polls shipment telemetry, evaluates a deterministic insurance policy
-inside the RISC Zero zkVM, and submits the resulting proof journal to smart
-contracts on Mantle. An on-chain agent identity controls who may submit claims,
-and a settlement vault pays qualifying claims in ERC-20 tokens.
+The agent polls oracle-signed shipment telemetry, verifies the oracle signature
+and evaluates a deterministic insurance policy inside the RISC Zero zkVM, then
+submits the resulting Groth16 receipt and ABI journal to smart contracts on
+Mantle. An ERC-8004-compatible identity controls who may submit claims, and a
+settlement vault pays qualifying claims in ERC-20 tokens.
 
 ## Architecture
 
 ```text
 Freight API
     |
+    +-- Ed25519-signed policy + shipment event
+    |
     v
 Kedge agent (Rust/Tokio)
     |
-    +-- local policy evaluation
+    +-- signature and chain preflight
+    +-- persistent/on-chain replay check
     |
     +-- RISC Zero guest execution
             |
             v
-      proof + ABI journal
+      Groth16 proof + ABI journal
             |
             v
 ClaimRegistry (Mantle)
@@ -43,6 +47,7 @@ SettlementVault --> ERC-20 payout
 | `methods/` | RISC Zero host bindings and zkVM guest program |
 | `contracts/` | Solidity identity, claim registry, and settlement contracts |
 | `mock-api/` | FastAPI freight telemetry simulator |
+| `docs/` | Deployment and ERC-8004 registration artifacts |
 
 ## Parametric Policy
 
@@ -72,8 +77,10 @@ git submodule update --init --recursive
 cp .env.example .env
 ```
 
-Fill in the wallet and deployed contract values in `.env`. Never commit this
-file or a funded private key.
+Fill in the wallet, oracle, policy, and deployed contract values in `.env`.
+Never commit this file or a funded private key. Set `KEDGE_ENV=testnet` to make
+the mock API fail closed unless stable oracle, claimant, and policy values are
+provided.
 
 ### Run the freight simulator
 
@@ -91,6 +98,18 @@ cargo test --workspace
 cd contracts && forge test
 ```
 
+The production Groth16 integration test is ignored by default because it runs a
+large Docker prover:
+
+```bash
+cargo test -p kedge-agent \
+  signed_oracle_payload_generates_evm_groth16_seal \
+  -- --ignored --nocapture
+```
+
+Run it on a machine with enough memory; it is intentionally not required for
+routine development.
+
 ### Run the agent
 
 Start Anvil or configure Mantle Sepolia contract addresses, then run:
@@ -103,25 +122,61 @@ cargo run -p kedge-agent
 testnet settlement must use a real verifier and cryptographically secure
 receipts.
 
+The runtime verifies the connected chain before polling, supports comma-
+separated `RPC_FALLBACK_URLS`, checks on-chain replay state before proving,
+persists completed claim IDs under `.kedge/`, waits for configurable
+confirmations, and applies bounded exponential backoff after failures.
+
 ## Smart Contracts
 
-- `AgentIdentityRegistry`: identity NFT and authorized-agent lookup
+- `AgentIdentityRegistry`: ERC-8004 registration, URI, metadata, verified agent
+  wallet, and authorized-agent lookup
 - `ClaimRegistry`: proof verification, replay protection, and settlement trigger
 - `SettlementVault`: restricted ERC-20 treasury disbursement
 - `MockUSDT`: local and testnet demonstration token
 
-The current deployment script uses RISC Zero's mock verifier for local Anvil
-development. Replace it with the network verifier before a production-style
-deployment.
+## Mantle Sepolia Deployment
+
+Generate the current guest image ID:
+
+```bash
+cargo run -q -p kedge-methods --example image_id
+```
+
+Configure every deployment variable in `.env`, including a distinct funded
+`DEPLOYER_PRIVATE_KEY`, `AGENT_WALLET_ADDRESS`, `ORACLE_KEY_HASH`,
+`CLAIM_EVALUATOR_IMAGE_ID`, `AGENT_METADATA_URI`, and
+`VAULT_FUNDING_AMOUNT`. Then simulate before broadcasting:
+
+```bash
+cd contracts
+forge script script/Deploy.s.sol:DeployMantleSepolia \
+  --rpc-url "$MANTLE_SEPOLIA_RPC"
+```
+
+Broadcast only after the simulation succeeds:
+
+```bash
+forge script script/Deploy.s.sol:DeployMantleSepolia \
+  --rpc-url "$MANTLE_SEPOLIA_RPC" \
+  --broadcast
+```
+
+The script deploys the RISC Zero v3 Groth16 verifier directly because the
+upstream deployment registry does not list a Mantle Sepolia verifier.
 
 ## Status
 
-- Shared parametric policy and zkVM guest implemented
-- ABI-compatible RISC Zero journal implemented
-- Alloy transaction broadcasting implemented
-- Identity-gated settlement contracts implemented
-- Local autonomous claim-to-payout loop verified
-- Mantle Sepolia deployment and real Groth16 proving in progress
+- Oracle-signed logistics payload verification implemented inside the zkVM
+- ABI journal binds policy, claimant, oracle, payload, expiry, and chain
+- RISC Zero v3 EVM seal encoding and production Groth16 path implemented
+- Hardened identity-gated contracts with 19 Foundry tests
+- ERC-8004 registration, metadata, URI, and verified-wallet support implemented
+- RPC failover, chain preflight, durable deduplication, confirmations, and
+  exponential backoff implemented
+- Mantle Sepolia deployment prepared; broadcast requires funded deployer and
+  agent wallets
+- Full local Groth16 generation is deferred to a higher-memory runner
 
 ## Security Notice
 

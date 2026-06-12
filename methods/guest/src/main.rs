@@ -11,9 +11,9 @@
 #![no_std]
 #![no_main]
 
-use kedge_core::{evaluate, ClaimInput};
-use risc0_zkvm::guest::env;
 use alloy_sol_types::SolValue;
+use kedge_core::{evaluate, verify_oracle_signature, ClaimInput};
+use risc0_zkvm::guest::env;
 
 risc0_zkvm::guest::entry!(main);
 
@@ -22,10 +22,25 @@ fn main() {
     // The input is passed via env::read() using standard serialization
     let claim_input: ClaimInput = env::read();
 
-    // 2. Evaluate the claim against the parametric rules
+    // 2. Authenticate the logistics oracle payload and validate its time window.
+    assert!(
+        verify_oracle_signature(&claim_input),
+        "invalid logistics oracle signature"
+    );
+    assert!(
+        claim_input.payload.issued_at <= claim_input.payload.event_timestamp,
+        "event predates oracle issuance"
+    );
+    assert!(
+        claim_input.payload.event_timestamp <= claim_input.payload.expires_at,
+        "event is outside oracle validity window"
+    );
+    assert!(claim_input.payload.chain_id != 0, "invalid target chain");
+
+    // 3. Evaluate the claim against the parametric rules
     let claim_output = evaluate(&claim_input);
 
-    // 3. ABI Encode the output and commit the raw bytes to the public journal
+    // 4. ABI encode the authenticated result into the public journal.
     // We use env::commit_slice because we are writing standard Solidity ABI-encoded bytes,
     // not a serialized Rust struct.
     let encoded = claim_output.abi_encode();

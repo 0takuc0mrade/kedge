@@ -52,6 +52,26 @@ pub struct ShipmentData {
 
     /// Unix timestamp of the data snapshot
     pub timestamp: u64,
+
+    /// Canonical policy identifier committed by the logistics oracle
+    pub policy_id: String,
+
+    /// Beneficiary address covered by the policy
+    pub claimant: String,
+
+    /// Monotonic oracle message nonce
+    pub nonce: u64,
+
+    /// Oracle signature validity window
+    pub issued_at: u64,
+    pub expires_at: u64,
+
+    /// Target settlement chain
+    pub chain_id: u64,
+
+    /// Ed25519 oracle credentials, hex encoded
+    pub oracle_public_key: String,
+    pub oracle_signature: String,
 }
 
 /// Fetch the latest shipment status from the mock freight API.
@@ -98,7 +118,15 @@ mod tests {
             "estimated_delivery": "2026-06-01T12:00:00Z",
             "actual_delivery": null,
             "insured_value": 50000,
-            "timestamp": 1749225600
+            "timestamp": 1749225600,
+            "policy_id": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+            "claimant": "0xabababababababababababababababababababab",
+            "nonce": 1,
+            "issued_at": 1749225600,
+            "expires_at": 1749225900,
+            "chain_id": 5003,
+            "oracle_public_key": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "oracle_signature": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
         }"#;
 
         let shipment: ShipmentData = serde_json::from_str(json).unwrap();

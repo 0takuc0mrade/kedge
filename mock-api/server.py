@@ -17,6 +17,8 @@ Endpoints:
 """
 
 import json
+import hashlib
+import os
 import random
 import time
 from datetime import datetime, timedelta, timezone
@@ -25,6 +27,8 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import BaseModel
 
 app = FastAPI(
@@ -61,6 +65,14 @@ class ShipmentData(BaseModel):
     actual_delivery: Optional[str] = None
     insured_value: int
     timestamp: int
+    policy_id: str
+    claimant: str
+    nonce: int
+    issued_at: int
+    expires_at: int
+    chain_id: int
+    oracle_public_key: str
+    oracle_signature: str
 
 
 class ScenarioConfig(BaseModel):
@@ -102,6 +114,90 @@ class APIState:
 
 state = APIState()
 
+environment = os.getenv("KEDGE_ENV", "development").lower()
+is_production = environment in {"production", "testnet"}
+
+
+def load_hex_env(name: str, expected_bytes: int, default: Optional[bytes] = None) -> bytes:
+    value = os.getenv(name)
+    if not value and default is None:
+        raise RuntimeError(f"{name} is required when KEDGE_ENV={environment}")
+    decoded = bytes.fromhex(value.removeprefix("0x")) if value else default
+    if len(decoded) != expected_bytes:
+        raise RuntimeError(f"{name} must contain exactly {expected_bytes} bytes")
+    return decoded
+
+
+oracle_private_key_hex = os.getenv("ORACLE_PRIVATE_KEY_HEX")
+if oracle_private_key_hex:
+    oracle_private_key = Ed25519PrivateKey.from_private_bytes(
+        load_hex_env("ORACLE_PRIVATE_KEY_HEX", 32, b"")
+    )
+    ephemeral_oracle = False
+elif is_production:
+    raise RuntimeError(
+        f"ORACLE_PRIVATE_KEY_HEX is required when KEDGE_ENV={environment}"
+    )
+else:
+    oracle_private_key = Ed25519PrivateKey.generate()
+    ephemeral_oracle = True
+
+oracle_public_key = oracle_private_key.public_key().public_bytes(
+    encoding=serialization.Encoding.Raw,
+    format=serialization.PublicFormat.Raw,
+)
+policy_id = load_hex_env(
+    "KEDGE_POLICY_ID",
+    32,
+    None if is_production else hashlib.sha256(b"KEDGE-DEMO-POLICY-001").digest(),
+)
+claimant = load_hex_env(
+    "KEDGE_CLAIMANT_ADDRESS",
+    20,
+    None if is_production else bytes.fromhex("42" * 20),
+)
+chain_id = int(os.getenv("CHAIN_ID", "5003"))
+oracle_ttl_secs = int(os.getenv("ORACLE_TTL_SECS", "300"))
+
+
+def status_code(status: ShipmentStatus) -> int:
+    return {
+        ShipmentStatus.ON_TIME: 0,
+        ShipmentStatus.DELAYED: 1,
+        ShipmentStatus.CRITICAL_DELAY: 2,
+        ShipmentStatus.LOST: 3,
+    }[status]
+
+
+def oracle_signing_bytes(
+    tracking_id: str,
+    status: ShipmentStatus,
+    delay_hours: int,
+    insured_value: int,
+    event_timestamp: int,
+    nonce: int,
+    issued_at: int,
+    expires_at: int,
+) -> bytes:
+    tracking_bytes = tracking_id.encode("utf-8")
+    return b"".join(
+        [
+            b"KEDGE_ORACLE_V1",
+            len(tracking_bytes).to_bytes(4, "big"),
+            tracking_bytes,
+            policy_id,
+            claimant,
+            status_code(status).to_bytes(1, "big"),
+            delay_hours.to_bytes(8, "big"),
+            insured_value.to_bytes(8, "big"),
+            event_timestamp.to_bytes(8, "big"),
+            nonce.to_bytes(8, "big"),
+            issued_at.to_bytes(8, "big"),
+            expires_at.to_bytes(8, "big"),
+            chain_id.to_bytes(8, "big"),
+        ]
+    )
+
 
 # ─── Shipment Generator ────────────────────────────────────
 
@@ -137,6 +233,20 @@ def generate_shipment(tracking_id: Optional[str] = None) -> ShipmentData:
     estimated = now - timedelta(hours=delay_hours)
     
     tid = tracking_id or f"KDG-2026-{state.call_count:04d}"
+    event_timestamp = int(now.timestamp())
+    issued_at = event_timestamp
+    expires_at = issued_at + oracle_ttl_secs
+    signing_bytes = oracle_signing_bytes(
+        tracking_id=tid,
+        status=scenario["status"],
+        delay_hours=delay_hours,
+        insured_value=state.insured_value,
+        event_timestamp=event_timestamp,
+        nonce=state.call_count,
+        issued_at=issued_at,
+        expires_at=expires_at,
+    )
+    signature = oracle_private_key.sign(signing_bytes)
 
     return ShipmentData(
         tracking_id=tid,
@@ -148,7 +258,15 @@ def generate_shipment(tracking_id: Optional[str] = None) -> ShipmentData:
         estimated_delivery=estimated.isoformat(),
         actual_delivery=None if delay_hours > 0 else now.isoformat(),
         insured_value=state.insured_value,
-        timestamp=int(now.timestamp()),
+        timestamp=event_timestamp,
+        policy_id=f"0x{policy_id.hex()}",
+        claimant=f"0x{claimant.hex()}",
+        nonce=state.call_count,
+        issued_at=issued_at,
+        expires_at=expires_at,
+        chain_id=chain_id,
+        oracle_public_key=f"0x{oracle_public_key.hex()}",
+        oracle_signature=f"0x{signature.hex()}",
     )
 
 
@@ -162,6 +280,9 @@ def health_check():
         "service": "kedge-mock-freight-api",
         "scenario": state.current_scenario,
         "calls_served": state.call_count,
+        "oracle_public_key": f"0x{oracle_public_key.hex()}",
+        "oracle_key_hash": f"0x{hashlib.sha256(oracle_public_key).hexdigest()}",
+        "ephemeral_oracle": ephemeral_oracle,
     }
 
 
@@ -220,6 +341,10 @@ if __name__ == "__main__":
     
     print("🚢 Kedge Mock Freight API")
     print("   Simulating maritime shipping telemetry")
+    print(f"   Oracle public key: 0x{oracle_public_key.hex()}")
+    print(f"   Oracle key hash:   0x{hashlib.sha256(oracle_public_key).hexdigest()}")
+    if ephemeral_oracle:
+        print("   WARNING: using an ephemeral oracle key; set ORACLE_PRIVATE_KEY_HEX for stable deployments")
     print("   http://localhost:8089")
     print("─" * 45)
     

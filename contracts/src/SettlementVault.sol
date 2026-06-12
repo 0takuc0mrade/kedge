@@ -14,6 +14,9 @@ contract SettlementVault {
 
     error Unauthorized();
     error InsufficientFunds();
+    error ZeroAddress();
+
+    event PayoutDisbursed(address indexed claimant, uint256 amount);
 
     modifier onlyRegistry() {
         if (msg.sender != claimRegistry) revert Unauthorized();
@@ -21,6 +24,8 @@ contract SettlementVault {
     }
 
     constructor(IERC20 _token, address _claimRegistry) {
+        if (address(_token) == address(0) || _claimRegistry == address(0)) revert ZeroAddress();
+
         token = _token;
         claimRegistry = _claimRegistry;
     }
@@ -30,9 +35,10 @@ contract SettlementVault {
     /// @param claimant The address receiving the payout.
     /// @param amount The amount of tokens to disburse.
     function disburse(address claimant, uint256 amount) external onlyRegistry {
+        if (claimant == address(0)) revert ZeroAddress();
         if (token.balanceOf(address(this)) < amount) revert InsufficientFunds();
 
-        // Use SafeERC20 to handle non-standard ERC20 return values (per ETH Skills: Security)
         token.safeTransfer(claimant, amount);
+        emit PayoutDisbursed(claimant, amount);
     }
 }

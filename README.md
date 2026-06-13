@@ -174,8 +174,8 @@ upstream deployment registry does not list a Mantle Sepolia verifier.
 - ERC-8004 registration, metadata, URI, and verified-wallet support implemented
 - RPC failover, chain preflight, durable deduplication, confirmations, and
   exponential backoff implemented
-- Mantle Sepolia deployment prepared; broadcast requires funded deployer and
-  agent wallets
+- Mantle Sepolia contracts deployed and linked on June 13, 2026; see
+  [`docs/mantle-sepolia-deployment.md`](docs/mantle-sepolia-deployment.md)
 - Full local Groth16 generation is deferred to a higher-memory runner
 
 ## Security Notice

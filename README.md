@@ -47,6 +47,7 @@ SettlementVault --> ERC-20 payout
 | `methods/` | RISC Zero host bindings and zkVM guest program |
 | `contracts/` | Solidity identity, claim registry, and settlement contracts |
 | `mock-api/` | FastAPI freight telemetry simulator |
+| `frontend/` | Next.js operations console and Mantle explorer interface |
 | `docs/` | Deployment and ERC-8004 registration artifacts |
 
 ## Parametric Policy
@@ -126,6 +127,18 @@ The runtime verifies the connected chain before polling, supports comma-
 separated `RPC_FALLBACK_URLS`, checks on-chain replay state before proving,
 persists completed claim IDs under `.kedge/`, waits for configurable
 confirmations, and applies bounded exponential backoff after failures.
+
+### Run the frontend
+
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+
+The dashboard runs at `http://localhost:3000`. Its wallet control is optional
+and intended for observers or future claimant/admin actions. Claim processing
+continues through the agent hot wallet and never depends on a browser wallet.
 
 ## Smart Contracts
 

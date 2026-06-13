@@ -181,6 +181,11 @@ a {
   color: var(--text);
 }
 
+.wallet-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
 .wallet-connected {
   border-color: rgba(110, 255, 207, 0.22);
   color: var(--mint);

@@ -32,6 +32,10 @@ import {
 } from "lucide-react";
 import OceanField from "./OceanField";
 import WalletButton from "./WalletButton";
+import CoverageActivation, {
+  COVERAGE_STORAGE_KEY,
+  CoverageMandate,
+} from "./CoverageActivation";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -130,8 +134,23 @@ export default function KedgeDashboard() {
   const rootRef = useRef<HTMLElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState("");
+  const [activationOpen, setActivationOpen] = useState(false);
+  const [coverage, setCoverage] = useState<CoverageMandate | null>(null);
 
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("activate") === "1") {
+      setActivationOpen(true);
+    }
+
+    const storedCoverage = localStorage.getItem(COVERAGE_STORAGE_KEY);
+    if (storedCoverage) {
+      try {
+        setCoverage(JSON.parse(storedCoverage) as CoverageMandate);
+      } catch {
+        localStorage.removeItem(COVERAGE_STORAGE_KEY);
+      }
+    }
+
     const reducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
@@ -215,6 +234,16 @@ export default function KedgeDashboard() {
           <a href="#network" onClick={() => setMenuOpen(false)}>
             Network
           </a>
+          <button
+            className={coverage ? "nav-coverage nav-coverage-active" : "nav-coverage"}
+            type="button"
+            onClick={() => {
+              setMenuOpen(false);
+              setActivationOpen(true);
+            }}
+          >
+            {coverage ? "Coverage active" : "Activate coverage"}
+          </button>
           <WalletButton />
           <a
             className="nav-cta"
@@ -252,13 +281,31 @@ export default function KedgeDashboard() {
             settles verified claims before a human adjuster opens the file.
           </p>
           <div className="hero-actions">
-            <a className="button button-primary" href="#desk">
-              Enter live desk <ArrowDownRight size={17} />
-            </a>
+            <button
+              className="button button-primary"
+              type="button"
+              onClick={() => setActivationOpen(true)}
+            >
+              {coverage ? "View active coverage" : "Activate coverage"}
+              {coverage ? <ShieldCheck size={17} /> : <ArrowDownRight size={17} />}
+            </button>
             <a className="button button-ghost" href="#proof">
               Trace a proof <Route size={17} />
             </a>
           </div>
+          {coverage && (
+            <button
+              className="coverage-monitoring"
+              type="button"
+              onClick={() => setActivationOpen(true)}
+            >
+              <span className="live-pulse" />
+              <span>
+                Monitoring <strong>{coverage.trackingId}</strong>
+              </span>
+              <ArrowUpRight size={14} />
+            </button>
+          )}
           <div className="hero-trust">
             <div>
               <ShieldCheck size={17} />
@@ -341,7 +388,7 @@ export default function KedgeDashboard() {
           <div className="console-data">
             <div>
               <span>Policy</span>
-              <strong>Delay &gt; 72 hours</strong>
+              <strong>Critical delay ≥ 48h</strong>
             </div>
             <div>
               <span>Observed</span>
@@ -454,7 +501,7 @@ export default function KedgeDashboard() {
               <div>
                 <Clock3 size={21} />
                 <span>
-                  Arrival delay exceeds <strong>72 hours</strong>
+                  Critical delay reaches <strong>48 hours</strong>
                 </span>
               </div>
             </div>
@@ -678,6 +725,13 @@ export default function KedgeDashboard() {
           </a>
         </div>
       </footer>
+
+      <CoverageActivation
+        open={activationOpen}
+        onClose={() => setActivationOpen(false)}
+        onActivated={setCoverage}
+        existingMandate={coverage}
+      />
     </main>
   );
 }

@@ -1,5 +1,10 @@
 import KedgeDashboard from "@/components/KedgeDashboard";
+import { WalletProvider } from "@/components/WalletProvider";
 
 export default function Home() {
-  return <KedgeDashboard />;
+  return (
+    <WalletProvider>
+      <KedgeDashboard />
+    </WalletProvider>
+  );
 }
